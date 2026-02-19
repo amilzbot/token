@@ -71,22 +71,57 @@ export function getTransferToATAInstructionPlan(
     ]);
 }
 
-type TransferToATAInstructionPlanAsyncInput = Omit<TransferToATAInstructionPlanInput, 'destination'>;
+/**
+ * Async input that makes `source` and `destination` derivable.
+ *
+ * - `source` is optional: when omitted, derived from `authority` address + `mint` via ATA PDA.
+ * - `destination` is always derived from `recipient` + `mint`.
+ * - `authority` is required here (the plugin defaults it to `client.payer`).
+ */
+export type TransferToATAInstructionPlanAsyncInput = Omit<
+    TransferToATAInstructionPlanInput,
+    'destination' | 'source'
+> & {
+    /** Source token account. When omitted, derived from authority's address + mint. */
+    source?: Address;
+    /** Token program address. Defaults to TOKEN_PROGRAM_ADDRESS. */
+    tokenProgram?: Address;
+};
 
 export async function getTransferToATAInstructionPlanAsync(
     input: TransferToATAInstructionPlanAsyncInput,
     config?: TransferToATAInstructionPlanConfig,
 ): Promise<InstructionPlan> {
-    const [ataAddress] = await findAssociatedTokenPda({
+    const tokenProgram = config?.tokenProgram ?? input.tokenProgram ?? TOKEN_PROGRAM_ADDRESS;
+
+    // Derive destination ATA from recipient + mint.
+    const [destinationAta] = await findAssociatedTokenPda({
         owner: input.recipient,
-        tokenProgram: config?.tokenProgram ?? TOKEN_PROGRAM_ADDRESS,
+        tokenProgram,
         mint: input.mint,
     });
+
+    // Derive source ATA if not provided.
+    let source = input.source;
+    if (!source) {
+        const authorityAddress: Address =
+            typeof input.authority === 'object' && 'address' in input.authority
+                ? input.authority.address
+                : (input.authority as Address);
+        const [sourceAta] = await findAssociatedTokenPda({
+            owner: authorityAddress,
+            tokenProgram,
+            mint: input.mint,
+        });
+        source = sourceAta;
+    }
+
     return getTransferToATAInstructionPlan(
         {
             ...input,
-            destination: ataAddress,
+            source,
+            destination: destinationAta,
         },
-        config,
+        { ...config, tokenProgram },
     );
 }

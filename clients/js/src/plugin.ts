@@ -9,7 +9,10 @@ import {
     tokenProgram as generatedTokenProgram,
 } from './generated';
 import { getMintToATAInstructionPlan, MintToATAInstructionPlanInput } from './mintToATA';
-import { getTransferToATAInstructionPlan, TransferToATAInstructionPlanInput } from './transferToATA';
+import {
+    getTransferToATAInstructionPlanAsync,
+    TransferToATAInstructionPlanAsyncInput,
+} from './transferToATA';
 
 export type TokenPluginRequirements = GeneratedTokenPluginRequirements & ClientWithPayer;
 
@@ -22,9 +25,18 @@ export type TokenPluginInstructions = GeneratedTokenPluginInstructions & {
     mintToATA: (
         input: MakeOptional<MintToATAInstructionPlanInput, 'payer'>,
     ) => ReturnType<typeof getMintToATAInstructionPlan> & SelfPlanAndSendFunctions;
+    /**
+     * Transfer tokens to a recipient's ATA (created if needed).
+     *
+     * Defaults:
+     * - `payer` defaults to `client.payer`
+     * - `authority` defaults to `client.payer`
+     * - `source` auto-derived from authority + mint when omitted
+     * - `destination` auto-derived from recipient + mint
+     */
     transferToATA: (
-        input: MakeOptional<TransferToATAInstructionPlanInput, 'payer'>,
-    ) => ReturnType<typeof getTransferToATAInstructionPlan> & SelfPlanAndSendFunctions;
+        input: MakeOptional<TransferToATAInstructionPlanAsyncInput, 'payer' | 'authority'>,
+    ) => Promise<Awaited<ReturnType<typeof getTransferToATAInstructionPlanAsync>>> & SelfPlanAndSendFunctions;
 };
 
 export function tokenProgram() {
@@ -48,7 +60,11 @@ export function tokenProgram() {
                     transferToATA: input =>
                         addSelfPlanAndSendFunctions(
                             client,
-                            getTransferToATAInstructionPlan({ ...input, payer: input.payer ?? client.payer }),
+                            getTransferToATAInstructionPlanAsync({
+                                ...input,
+                                payer: input.payer ?? client.payer,
+                                authority: input.authority ?? client.payer,
+                            }),
                         ),
                 },
             },
