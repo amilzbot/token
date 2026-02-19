@@ -153,3 +153,101 @@ test('it transfers tokens from one account to an existing ATA', async t => {
     t.like(tokenDataA, <Token>{ amount: 40n });
     t.like(tokenDataB, <Token>{ amount: 60n });
 });
+
+test('async variant auto-derives source ATA when omitted', async t => {
+    // Given a mint, an owner with tokens in their ATA, and a recipient.
+    const client = createDefaultSolanaClient();
+    const [payer, mintAuthority, ownerA, ownerB] = await Promise.all([
+        generateKeyPairSignerWithSol(client),
+        generateKeyPairSigner(),
+        generateKeyPairSigner(),
+        generateKeyPairSigner(),
+    ]);
+    const decimals = 2;
+    const mint = await createMint(client, payer, mintAuthority.address, decimals);
+
+    // Create an ATA for ownerA and mint tokens to it.
+    const tokenA = await createTokenPdaWithAmount(client, payer, mintAuthority, mint, ownerA.address, 100n, decimals);
+
+    // When ownerA transfers 30 tokens WITHOUT specifying source (should auto-derive).
+    const instructionPlan = await getTransferToATAInstructionPlanAsync({
+        payer,
+        mint,
+        // source omitted — should derive from ownerA + mint
+        authority: ownerA,
+        recipient: ownerB.address,
+        amount: 30n,
+        decimals,
+    });
+
+    const transactionPlanner = createDefaultTransactionPlanner(client, payer);
+    const transactionPlan = await transactionPlanner(instructionPlan);
+    await client.sendTransactionPlan(transactionPlan);
+
+    // Then the ATA balances should reflect the transfer.
+    const [tokenB] = await findAssociatedTokenPda({
+        owner: ownerB.address,
+        mint,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    const [{ data: tokenDataA }, { data: tokenDataB }] = await Promise.all([
+        fetchToken(client.rpc, tokenA),
+        fetchToken(client.rpc, tokenB),
+    ]);
+    t.like(tokenDataA, <Token>{ amount: 70n });
+    t.like(tokenDataB, <Token>{ amount: 30n });
+});
+
+test('async variant auto-derives source when authority is a TransactionSigner', async t => {
+    // Given a mint, payer with tokens in their ATA, and a recipient.
+    // This tests that the signer's .address is correctly extracted for PDA derivation.
+    const client = createDefaultSolanaClient();
+    const [payer, mintAuthority, recipient] = await Promise.all([
+        generateKeyPairSignerWithSol(client),
+        generateKeyPairSigner(),
+        generateKeyPairSigner(),
+    ]);
+    const decimals = 2;
+    const mint = await createMint(client, payer, mintAuthority.address, decimals);
+
+    // Create ATA for payer and mint tokens to it.
+    const payerAta = await createTokenPdaWithAmount(
+        client,
+        payer,
+        mintAuthority,
+        mint,
+        payer.address,
+        200n,
+        decimals,
+    );
+
+    // When payer transfers 75 tokens with source omitted and authority as a signer.
+    const instructionPlan = await getTransferToATAInstructionPlanAsync({
+        payer,
+        mint,
+        // source omitted — should derive from payer.address + mint
+        authority: payer, // TransactionSigner, not just Address
+        recipient: recipient.address,
+        amount: 75n,
+        decimals,
+    });
+
+    const transactionPlanner = createDefaultTransactionPlanner(client, payer);
+    const transactionPlan = await transactionPlanner(instructionPlan);
+    await client.sendTransactionPlan(transactionPlan);
+
+    // Then balances should reflect the transfer.
+    const [recipientAta] = await findAssociatedTokenPda({
+        owner: recipient.address,
+        mint,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    const [{ data: payerTokenData }, { data: recipientTokenData }] = await Promise.all([
+        fetchToken(client.rpc, payerAta),
+        fetchToken(client.rpc, recipientAta),
+    ]);
+    t.like(payerTokenData, <Token>{ amount: 125n });
+    t.like(recipientTokenData, <Token>{ amount: 75n });
+});
