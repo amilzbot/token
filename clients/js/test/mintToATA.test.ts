@@ -1,4 +1,4 @@
-import { Account, generateKeyPairSigner, none } from '@solana/kit';
+import { Account, Address, generateKeyPairSigner, none } from '@solana/kit';
 import test from 'ava';
 import {
     AccountState,
@@ -9,12 +9,21 @@ import {
     fetchToken,
     findAssociatedTokenPda,
 } from '../src';
+import type { SingleInstructionPlan, SequentialInstructionPlan } from '@solana/instruction-plans';
 import {
     createDefaultSolanaClient,
     createDefaultTransactionPlanner,
     createMint,
     generateKeyPairSignerWithSol,
 } from './_setup';
+
+/** Extract the account addresses from a sequential instruction plan's instructions. */
+function getInstructionAccounts(plan: SequentialInstructionPlan): Address[][] {
+    return plan.plans.map(p => {
+        const single = p as SingleInstructionPlan;
+        return (single.instruction.accounts ?? []).map((a: any) => a.address);
+    });
+}
 
 test('it creates a new associated token account with an initial balance', async t => {
     // Given a mint account, its mint authority, a token owner and the ATA.
@@ -169,4 +178,65 @@ test('it also mints to an existing associated token account', async t => {
             closeAuthority: none(),
         },
     });
+});
+
+// --- Offline tests: verify derived addresses in instruction plans ---
+
+test('async variant auto-derives ATA from owner + mint', async t => {
+    const payer = await generateKeyPairSigner();
+    const mintAuthority = await generateKeyPairSigner();
+    const owner = (await generateKeyPairSigner()).address;
+    const mint = (await generateKeyPairSigner()).address;
+
+    const [expectedAta] = await findAssociatedTokenPda({
+        owner,
+        mint,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    const plan = await getMintToATAInstructionPlanAsync({
+        payer,
+        mint,
+        owner,
+        mintAuthority,
+        amount: 500n,
+        decimals: 6,
+    });
+
+    const seqPlan = plan as SequentialInstructionPlan;
+    t.is(seqPlan.kind, 'sequential');
+    t.is(seqPlan.plans.length, 2);
+
+    const accounts = getInstructionAccounts(seqPlan);
+
+    // createAssociatedTokenIdempotent — ata at index 1
+    t.is(accounts[0][1], expectedAta);
+
+    // mintToChecked — token at index 1
+    t.is(accounts[1][1], expectedAta);
+});
+
+test('async variant uses explicit ATA when provided', async t => {
+    const payer = await generateKeyPairSigner();
+    const mintAuthority = await generateKeyPairSigner();
+    const owner = (await generateKeyPairSigner()).address;
+    const mint = (await generateKeyPairSigner()).address;
+    const explicitAta = (await generateKeyPairSigner()).address;
+
+    const plan = await getMintToATAInstructionPlanAsync({
+        payer,
+        mint,
+        owner,
+        mintAuthority,
+        ata: explicitAta,
+        amount: 500n,
+        decimals: 6,
+    });
+
+    const seqPlan = plan as SequentialInstructionPlan;
+    const accounts = getInstructionAccounts(seqPlan);
+
+    // Should use explicit ATA, not derived
+    t.is(accounts[0][1], explicitAta);
+    t.is(accounts[1][1], explicitAta);
 });
