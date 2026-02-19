@@ -8,7 +8,10 @@ import {
     TokenPluginRequirements as GeneratedTokenPluginRequirements,
     tokenProgram as generatedTokenProgram,
 } from './generated';
-import { getMintToATAInstructionPlan, MintToATAInstructionPlanInput } from './mintToATA';
+import {
+    getMintToATAInstructionPlanAsync,
+    MintToATAInstructionPlanAsyncInput,
+} from './mintToATA';
 import {
     getTransferToATAInstructionPlanAsync,
     TransferToATAInstructionPlanAsyncInput,
@@ -19,12 +22,27 @@ export type TokenPluginRequirements = GeneratedTokenPluginRequirements & ClientW
 export type TokenPlugin = Omit<GeneratedTokenPlugin, 'instructions'> & { instructions: TokenPluginInstructions };
 
 export type TokenPluginInstructions = GeneratedTokenPluginInstructions & {
+    /**
+     * Create a new token mint.
+     *
+     * Defaults:
+     * - `payer` defaults to `client.payer`
+     * - `mintAuthority` defaults to `client.payer.address`
+     */
     createMint: (
-        input: MakeOptional<CreateMintInstructionPlanInput, 'payer'>,
+        input: MakeOptional<CreateMintInstructionPlanInput, 'payer' | 'mintAuthority'>,
     ) => ReturnType<typeof getCreateMintInstructionPlan> & SelfPlanAndSendFunctions;
+    /**
+     * Mint tokens to a recipient's ATA (created if needed).
+     *
+     * Defaults:
+     * - `payer` defaults to `client.payer`
+     * - `mintAuthority` defaults to `client.payer`
+     * - `ata` auto-derived from owner + mint
+     */
     mintToATA: (
-        input: MakeOptional<MintToATAInstructionPlanInput, 'payer'>,
-    ) => ReturnType<typeof getMintToATAInstructionPlan> & SelfPlanAndSendFunctions;
+        input: MakeOptional<MintToATAInstructionPlanAsyncInput, 'payer' | 'mintAuthority'>,
+    ) => Promise<Awaited<ReturnType<typeof getMintToATAInstructionPlanAsync>>> & SelfPlanAndSendFunctions;
     /**
      * Transfer tokens to a recipient's ATA (created if needed).
      *
@@ -50,12 +68,20 @@ export function tokenProgram() {
                     createMint: input =>
                         addSelfPlanAndSendFunctions(
                             client,
-                            getCreateMintInstructionPlan({ ...input, payer: input.payer ?? client.payer }),
+                            getCreateMintInstructionPlan({
+                                ...input,
+                                payer: input.payer ?? client.payer,
+                                mintAuthority: input.mintAuthority ?? client.payer.address,
+                            }),
                         ),
                     mintToATA: input =>
                         addSelfPlanAndSendFunctions(
                             client,
-                            getMintToATAInstructionPlan({ ...input, payer: input.payer ?? client.payer }),
+                            getMintToATAInstructionPlanAsync({
+                                ...input,
+                                payer: input.payer ?? client.payer,
+                                mintAuthority: input.mintAuthority ?? client.payer,
+                            }),
                         ),
                     transferToATA: input =>
                         addSelfPlanAndSendFunctions(
