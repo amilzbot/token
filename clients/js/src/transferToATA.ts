@@ -84,6 +84,8 @@ export type TransferToATAInstructionPlanAsyncInput = Omit<
 > & {
     /** Source token account. When omitted, derived from authority's address + mint. */
     source?: Address;
+    /** Destination ATA. When omitted, derived from recipient + mint. */
+    destination?: Address;
     /** Token program address. Defaults to TOKEN_PROGRAM_ADDRESS. */
     tokenProgram?: Address;
 };
@@ -94,12 +96,12 @@ export async function getTransferToATAInstructionPlanAsync(
 ): Promise<InstructionPlan> {
     const tokenProgram = config?.tokenProgram ?? input.tokenProgram ?? TOKEN_PROGRAM_ADDRESS;
 
-    // Derive destination ATA from recipient + mint.
-    const [destinationAta] = await findAssociatedTokenPda({
+    // Derive destination ATA from recipient + mint (unless explicitly provided).
+    const destinationAta = input.destination ?? (await findAssociatedTokenPda({
         owner: input.recipient,
         tokenProgram,
         mint: input.mint,
-    });
+    }))[0];
 
     // Derive source ATA if not provided.
     let source = input.source;
